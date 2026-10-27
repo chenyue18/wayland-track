@@ -105,7 +105,14 @@ func (d *Daemon) Run() error {
 			d.logger.Printf("清理上次残留: %s", m)
 		}
 	}
-	targets := takeover.Discover(d.opts.RuntimeDir, !d.opts.NoWayland, !d.opts.NoX11)
+	var targets []takeover.Target
+	for retry := 0; retry < 15; retry++ {
+		targets = takeover.Discover(d.opts.RuntimeDir, !d.opts.NoWayland, !d.opts.NoX11)
+		if len(targets) > 0 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
 	if d.opts.Displays != nil {
 		filtered := targets[:0]
 		for _, t := range targets {

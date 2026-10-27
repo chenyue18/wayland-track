@@ -19,4 +19,5 @@ namespace relay {
 enum { DIR_C2S = 0, DIR_S2C = 1 };
 
 void pump(int src_fd, int dst_fd, int dir, std::shared_ptr<PumpCtx> ctx);
+void pump_impl(int src_fd, int dst_fd, int dir, std::shared_ptr<PumpCtx> ctx);
 }  // namespace relay

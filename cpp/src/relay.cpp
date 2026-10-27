@@ -52,10 +52,30 @@ ssize_t send_all(int dst, const uint8_t* data, size_t len, const std::vector<int
 }  // namespace
 
 void pump(int src_fd, int dst_fd, int dir, std::shared_ptr<PumpCtx> ctx) {
+    try {
+        pump_impl(src_fd, dst_fd, dir, ctx);
+    } catch (const std::exception& e) {
+        logf("转发线程异常(已恢复，不影响其他连接): %s", e.what());
+        if (ctx->remaining->fetch_sub(1) == 1) {
+            ctx->tracker->close_conn(ctx->conn_id);
+            close(ctx->client_fd);
+            close(ctx->real_fd);
+        }
+    } catch (...) {
+        logf("转发线程未知异常(已恢复)");
+        if (ctx->remaining->fetch_sub(1) == 1) {
+            ctx->tracker->close_conn(ctx->conn_id);
+            close(ctx->client_fd);
+            close(ctx->real_fd);
+        }
+    }
+}
+
+void pump_impl(int src_fd, int dst_fd, int dir, std::shared_ptr<PumpCtx> ctx) {
     auto parser = ctx->parser;
     Tracker* tracker = ctx->tracker.get();
     uint64_t conn_id = ctx->conn_id;
-    std::vector<uint8_t> buf(4 << 20);
+    std::vector<uint8_t> buf(256 << 10);
     std::vector<uint8_t> oob(16 << 10);
     while (true) {
         struct iovec iov{};

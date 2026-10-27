@@ -64,6 +64,19 @@ wayland-track launch --report-dir ./out -- xdpyinfo
 
 通过环境变量（`WAYLAND_DISPLAY` / `DISPLAY`）把该应用导向一次性代理 socket，不改动系统会话，退出即出报告。
 
+## 开机自启（systemd 用户服务）
+
+```sh
+deploy/install-service.sh cpp      # 或 go；无需 root
+```
+
+随图形会话启动（`graphical-session.target`）、注销时自动优雅退出并恢复 socket、
+崩溃后 2 秒自动重启并在启动时清理残留接管。报告与日志写在持久目录
+`~/.local/share/wayland-track/`（注意：默认的 `$XDG_RUNTIME_DIR` 是 tmpfs，重启即清空）。
+
+管理：`systemctl --user status|stop|disable wayland-track`；实时日志
+`tail -f ~/.local/share/wayland-track/daemon.log`。
+
 ## 报告示例
 
 ```markdown

@@ -94,6 +94,10 @@ int Daemon::run() {
                 }
         targets = filtered;
     }
+    for (int retry = 0; retry < 15 && targets.empty(); retry++) {
+        if (retry) usleep(1000 * 1000);
+        targets = takeover::discover(opts_.runtime_dir, !opts_.no_wayland, !opts_.no_x11);
+    }
     if (targets.empty()) {
         logf("没有发现可接管的 Wayland/X11 socket（RuntimeDir=%s）", opts_.runtime_dir.c_str());
         return 1;

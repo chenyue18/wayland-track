@@ -1,0 +1,15 @@
+[Unit]
+Description=wayland-track - Wayland/X11 图形协议监控守护进程
+Documentation=file://%h/code/Angier_Research/wayland-track/README.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/code/Angier_Research/wayland-track/cpp/build/wayland-track daemon --report-dir %h/.local/share/wayland-track/reports --log-file %h/.local/share/wayland-track/daemon.log
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=graphical-session.target

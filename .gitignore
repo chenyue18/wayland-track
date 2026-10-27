@@ -1,0 +1,11 @@
+# 构建产物
+wayland-track
+cpp/build/
+*.o
+*.test
+
+# Go
+/go.sum.bak
+
+# 本地测试输出
+*.log

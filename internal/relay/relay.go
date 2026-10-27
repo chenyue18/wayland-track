@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"fmt"
 	"net"
+	"os"
 	"syscall"
 	"time"
 
@@ -49,7 +51,16 @@ func sendAll(dst *net.UnixConn, data []byte, fds []int) error {
 
 func Pump(src, dst *net.UnixConn, dir int, p report.Parser, tracker *report.Tracker, connID uint64, onClose func()) {
 	defer onClose()
-	buf := make([]byte, 4<<20)
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "wayland-track: 转发线程异常(已恢复，不影响其他连接): %v\n", r)
+		}
+	}()
+	pumpImpl(src, dst, dir, p, tracker, connID)
+}
+
+func pumpImpl(src, dst *net.UnixConn, dir int, p report.Parser, tracker *report.Tracker, connID uint64) {
+	buf := make([]byte, 256<<10)
 	oob := make([]byte, 16<<10)
 	for {
 		n, oobn, _, _, err := src.ReadMsgUnix(buf, oob)
