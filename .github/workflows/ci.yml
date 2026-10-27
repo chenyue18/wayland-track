@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: Go 构建/测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./internal/... -v
+
+  cpp:
+    name: C++ 构建/测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查生成代码与 proto 同步
+        run: |
+          cd cpp
+          make gen
+          git diff --exit-code -- src/gen
+
+      - name: Build
+        run: make -C cpp
+
+      - name: Test
+        run: make -C cpp test
