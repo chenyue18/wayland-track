@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -39,6 +40,82 @@ type MsgDef struct {
 	Args []Arg `xml:"arg"`
 }
 
+type EnumEntry struct {
+	Name  string
+	Value int64
+}
+
+type Enum struct {
+	Name     string
+	Bitfield bool
+	Entries  []EnumEntry
+}
+
+func (db *DB) EnumOf(iface, enumName string) *Enum {
+	if enumName == "" {
+		return nil
+	}
+	if i := strings.IndexByte(enumName, '.'); i >= 0 {
+		return db.EnumOf(enumName[:i], enumName[i+1:])
+	}
+	it := db.Ifaces[iface]
+	if it == nil {
+		return nil
+	}
+	for _, en := range it.Enums {
+		if en.Name == enumName {
+			e := &Enum{Name: en.Name, Bitfield: en.Bitfield}
+			for _, entry := range en.Entries {
+				v, err := strconv.ParseInt(entry.Value, 0, 64)
+				if err != nil {
+					continue
+				}
+				e.Entries = append(e.Entries, EnumEntry{Name: entry.Name, Value: v})
+			}
+			return e
+		}
+	}
+	return nil
+}
+
+func (db *DB) FormatEnumValue(e *Enum, v uint32) string {
+	if e == nil {
+		return fmt.Sprintf("%d", int32(v))
+	}
+	if e.Bitfield {
+		var out string
+		var covered uint32
+		for _, entry := range e.Entries {
+			if entry.Value != 0 && v&uint32(entry.Value) == uint32(entry.Value) {
+				if out != "" {
+					out += "|"
+				}
+				out += entry.Name
+				covered |= uint32(entry.Value)
+			}
+		}
+		if unknown := v &^ covered; unknown != 0 {
+			if out != "" {
+				out += "|"
+			}
+			out += fmt.Sprintf("0x%x", unknown)
+		}
+		if out == "" {
+			return "0"
+		}
+		return out
+	}
+	for _, entry := range e.Entries {
+		if uint32(entry.Value) == v {
+			return entry.Name
+		}
+	}
+	if v <= 0x7fffffff {
+		return fmt.Sprintf("%d", int32(v))
+	}
+	return fmt.Sprintf("%d", v)
+}
+
 type Iface struct {
 	Name     string `xml:"name,attr"`
 	Version  int    `xml:"version,attr"`
@@ -52,12 +129,6 @@ type protocolXML struct {
 	Name      string    `xml:"name,attr"`
 	Ifaces    []Iface   `xml:"interface"`
 	Copyright string    `xml:"copyright"`
-}
-
-type Enum struct {
-	Bitfield bool
-	ByName   map[string]Entry
-	ByValue  map[string]string
 }
 
 type DB struct {
@@ -139,19 +210,11 @@ func (db *DB) parse(b []byte, src string) error {
 			e.Type = "event"
 		}
 		db.Ifaces[iface.Name] = iface
-		for _, en := range iface.Enums {
-			key := iface.Name + "." + en.Name
-			e := &Enum{Bitfield: en.Bitfield, ByName: map[string]Entry{}, ByValue: map[string]string{}}
-			for _, entry := range en.Entries {
-				e.ByName[entry.Name] = entry
-				e.ByValue[entry.Value] = entry.Name
-			}
-			db.Enums[key] = e
-		}
 	}
 	db.Sources = append(db.Sources, src)
 	return nil
 }
+
 
 func (db *DB) Request(iface string, opcode int) *MsgDef {
 	i := db.Ifaces[iface]

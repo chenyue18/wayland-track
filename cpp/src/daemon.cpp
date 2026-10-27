@@ -213,7 +213,14 @@ void Daemon::handle_conn(int client_fd, const Target& t) {
         close(client_fd);
         return;
     }
-    ProcInfo app = procinfo_read(pid);
+    char self_exe[4096] = {0};
+    readlink("/proc/self/exe", self_exe, sizeof(self_exe) - 1);
+    ProcInfo app;
+    for (int i = 0; i < 25; i++) {
+        app = procinfo_read(pid);
+        if (app.exe != self_exe) break;
+        usleep(20 * 1000);
+    }
     AppInfo ai;
     ai.pid = pid;
     ai.uid = uid;

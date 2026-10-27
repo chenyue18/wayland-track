@@ -157,18 +157,28 @@ func (p *Parser) decode(dir int, iface string, objID uint32, opcode uint16, payl
 
 func (p *Parser) decodeArg(dir int, rd *reader, a *protocol.Arg, iface string, objID uint32) (string, error) {
 	switch a.Type {
-	case "int":
-		x, err := rd.i32()
+	case "int", "uint":
+		isUint := a.Type == "uint"
+		var u uint32
+		var i int32
+		var err error
+		if isUint {
+			u, err = rd.u32()
+			i = int32(u)
+		} else {
+			i, err = rd.i32()
+			u = uint32(i)
+		}
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s=%d", a.Name, x), nil
-	case "uint":
-		x, err := rd.u32()
-		if err != nil {
-			return "", err
+		if a.Enum != "" {
+			return fmt.Sprintf("%s=%s", a.Name, p.db.FormatEnumValue(p.db.EnumOf(iface, a.Enum), u)), nil
 		}
-		return fmt.Sprintf("%s=%d", a.Name, x), nil
+		if isUint {
+			return fmt.Sprintf("%s=%d", a.Name, u), nil
+		}
+		return fmt.Sprintf("%s=%d", a.Name, i), nil
 	case "fixed":
 		x, err := rd.i32()
 		if err != nil {

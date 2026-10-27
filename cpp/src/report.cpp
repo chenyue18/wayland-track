@@ -127,11 +127,23 @@ void Tracker::sweep() {
     for (int pid : dead) finalize_locked(pid);
 }
 
-void Tracker::finalize_all() {
-    std::lock_guard<std::mutex> lk(mu_);
+void Tracker::finalize_all_locked() {
     std::vector<int> pids;
     for (auto& kv : sessions_) pids.push_back(kv.first);
     for (int pid : pids) finalize_locked(pid);
+}
+
+void Tracker::finalize_all() {
+    std::lock_guard<std::mutex> lk(mu_);
+    finalize_all_locked();
+}
+
+std::vector<Report> Tracker::finalize_collect() {
+    std::lock_guard<std::mutex> lk(mu_);
+    finalize_all_locked();
+    std::vector<Report> out;
+    out.swap(collected_);
+    return out;
 }
 
 int Tracker::active_conns() const {
@@ -144,6 +156,10 @@ void Tracker::finalize_locked(int pid) {
     if (it == sessions_.end()) return;
     Report rep = build_report(it->second);
     sessions_.erase(it);
+    if (collect_only_) {
+        collected_.push_back(std::move(rep));
+        return;
+    }
     std::string path = write_report(rep);
     logf("已生成报告: %s", path.c_str());
 }
@@ -184,6 +200,51 @@ static std::vector<std::string> ifaces_sorted(const std::map<std::string, IfaceS
     return names;
 }
 
+static void append_conn_json(std::string& o, const ConnReport& c) {
+    o += "    {\n";
+    o += "      \"id\": " + fmt("%d", c.id) + ",\n";
+    o += "      \"protocol\": \"" + json_escape(c.proto) + "\",\n";
+    o += "      \"socket\": \"" + json_escape(c.socket) + "\",\n";
+    o += "      \"start\": \"" + fmt_time_full(c.start) + "\",\n";
+    o += std::string("      \"end\": ") + (c.closed ? "\"" + fmt_time_full(c.end) + "\"" : "null") + ",\n";
+    o += "      \"message_count\": " + fmt("%d", c.msg_count) + ",\n";
+    o += "      \"logged_messages\": " + fmt("%d", c.logged) + ",\n";
+    o += std::string("      \"truncated\": ") + (c.truncated ? "true" : "false") + ",\n";
+    o += "      \"interface_stats\": {";
+    {
+        bool first = true;
+        for (auto& kv : c.stats) {
+            if (!first) o += ", ";
+            first = false;
+            o += "\"" + json_escape(kv.first) + "\": {\"sent\": " + fmt("%d", kv.second.sent) +
+                 ", \"recv\": " + fmt("%d", kv.second.recv) + "}";
+        }
+    }
+    o += "},\n";
+    o += "      \"meta\": {";
+    {
+        bool first = true;
+        for (auto& kv : c.meta) {
+            if (!first) o += ", ";
+            first = false;
+            o += "\"" + json_escape(kv.first) + "\": \"" + json_escape(kv.second) + "\"";
+        }
+    }
+    o += "},\n";
+    o += "      \"messages\": [\n";
+    for (size_t j = 0; j < c.msgs.size(); j++) {
+        const Msg& m = c.msgs[j];
+        o += "        {\"time\": \"" + fmt_time_full(m.time) + "\", \"dir\": \"" + json_escape(m.dir) +
+             "\", \"interface\": \"" + json_escape(m.iface) + "\", \"name\": \"" + json_escape(m.name) +
+             "\", \"object\": \"" + json_escape(m.object) + "\", \"detail\": \"" + json_escape(m.detail) +
+             "\", \"bytes\": " + fmt("%d", m.bytes) + "}";
+        if (j + 1 < c.msgs.size()) o += ",";
+        o += "\n";
+    }
+    o += "      ]\n";
+    o += "    }";
+}
+
 bool write_json_report(const std::string& path, const Report& rep) {
     std::string o;
     o.reserve(1 << 16);
@@ -195,53 +256,37 @@ bool write_json_report(const std::string& path, const Report& rep) {
     o += "  \"first_seen\": \"" + fmt_time_full(rep.first_seen) + "\",\n";
     o += "  \"connections\": [\n";
     for (size_t i = 0; i < rep.connections.size(); i++) {
-        const ConnReport& c = rep.connections[i];
-        o += "    {\n";
-        o += "      \"id\": " + fmt("%d", c.id) + ",\n";
-        o += "      \"protocol\": \"" + json_escape(c.proto) + "\",\n";
-        o += "      \"socket\": \"" + json_escape(c.socket) + "\",\n";
-        o += "      \"start\": \"" + fmt_time_full(c.start) + "\",\n";
-        o += std::string("      \"end\": ") + (c.closed ? "\"" + fmt_time_full(c.end) + "\"" : "null") + ",\n";
-        o += "      \"message_count\": " + fmt("%d", c.msg_count) + ",\n";
-        o += "      \"logged_messages\": " + fmt("%d", c.logged) + ",\n";
-        o += std::string("      \"truncated\": ") + (c.truncated ? "true" : "false") + ",\n";
-        o += "      \"interface_stats\": {";
-        {
-            bool first = true;
-            for (auto& kv : c.stats) {
-                if (!first) o += ", ";
-                first = false;
-                o += "\"" + json_escape(kv.first) + "\": {\"sent\": " + fmt("%d", kv.second.sent) +
-                     ", \"recv\": " + fmt("%d", kv.second.recv) + "}";
-            }
-        }
-        o += "},\n";
-        o += "      \"meta\": {";
-        {
-            bool first = true;
-            for (auto& kv : c.meta) {
-                if (!first) o += ", ";
-                first = false;
-                o += "\"" + json_escape(kv.first) + "\": \"" + json_escape(kv.second) + "\"";
-            }
-        }
-        o += "},\n";
-        o += "      \"messages\": [\n";
-        for (size_t j = 0; j < c.msgs.size(); j++) {
-            const Msg& m = c.msgs[j];
-            o += "        {\"time\": \"" + fmt_time_full(m.time) + "\", \"dir\": \"" + json_escape(m.dir) +
-                 "\", \"interface\": \"" + json_escape(m.iface) + "\", \"name\": \"" + json_escape(m.name) +
-                 "\", \"object\": \"" + json_escape(m.object) + "\", \"detail\": \"" + json_escape(m.detail) +
-                 "\", \"bytes\": " + fmt("%d", m.bytes) + "}";
-            if (j + 1 < c.msgs.size()) o += ",";
-            o += "\n";
-        }
-        o += "      ]\n";
-        o += "    }";
+        append_conn_json(o, rep.connections[i]);
         if (i + 1 < rep.connections.size()) o += ",";
         o += "\n";
     }
     o += "  ]\n}\n";
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f) return false;
+    f << o;
+    return bool(f);
+}
+
+bool write_correlated_json(const std::string& path, const CorrelatedInput& in) {
+    std::string o;
+    o.reserve(1 << 16);
+    o += "{\n";
+    o += "  \"app\": {\"pid\": " + fmt("%d", in.app.pid) + ", \"comm\": \"" + json_escape(in.app.comm) +
+         "\", \"exe\": \"" + json_escape(in.app.exe) + "\", \"cmdline\": \"" + json_escape(in.app.cmdline) +
+         "\", \"uid\": " + fmt("%d", in.app.uid) + ", \"gid\": " + fmt("%d", in.app.gid) + "},\n";
+    o += "  \"xwayland_display\": \"" + json_escape(in.display) + "\",\n";
+    auto arr = [&](const char* key, const std::vector<ConnReport>& cs) {
+        o += std::string("  \"") + key + "\": [\n";
+        for (size_t i = 0; i < cs.size(); i++) {
+            append_conn_json(o, cs[i]);
+            if (i + 1 < cs.size()) o += ",";
+            o += "\n";
+        }
+        o += "  ],\n";
+    };
+    arr("x11", in.x11);
+    arr("wayland", in.wayland);
+    o += "  \"generated_at\": \"" + fmt_time_full(Clock::now()) + "\"\n}\n";
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     if (!f) return false;
     f << o;
@@ -310,6 +355,90 @@ bool write_markdown_report(const std::string& path, const Report& rep) {
                      md_escape(m.dir).c_str(), md_escape(m.object).c_str(), md_escape(m.name).c_str(),
                      md_escape(detail).c_str(), m.bytes);
         }
+    }
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f) return false;
+    f << b;
+    return bool(f);
+}
+
+bool write_correlated_markdown(const std::string& path, const CorrelatedInput& in) {
+    std::string b;
+    b.reserve(1 << 17);
+    b += "# X11 → Wayland 关联对照报告\n\n";
+    b += "> 由 wayland-track (C++) 生成：应用通过受控 Xwayland 运行，\"X11 侧\"为应用发出的 X11 协议，\"Wayland 侧\"为 Xwayland 翻译后发给合成器的协议。时间轴按统一时钟合并。\n\n";
+    b += "## 应用信息\n\n| 项 | 值 |\n|---|---|\n";
+    b += fmt("| 应用 | %s (pid %d) |\n", md_escape(in.app.comm).c_str(), in.app.pid);
+    if (!in.app.exe.empty()) b += fmt("| 可执行文件 | `%s` |\n", md_escape(in.app.exe).c_str());
+    if (!in.app.cmdline.empty()) b += fmt("| 命令行 | `%s` |\n", md_escape(in.app.cmdline).c_str());
+    b += fmt("| 受控 Xwayland 显示号 | %s |\n", md_escape(in.display).c_str());
+
+    auto side_summary = [&](const char* name, const std::vector<ConnReport>& cs) {
+        int conns = (int)cs.size(), msgs = 0;
+        TimePoint first, last;
+        for (auto& c : cs) {
+            msgs += c.msg_count;
+            if (first == TimePoint{} || c.start < first) first = c.start;
+            if (c.end > last) last = c.end;
+            if (c.start > last) last = c.start;
+        }
+        b += fmt("| %s | %d | %d | %s ~ %s |\n", name, conns, msgs,
+                 conns ? fmt_time_full(first).c_str() : "-",
+                 conns ? fmt_time_full(last).c_str() : "-");
+    };
+    b += "\n## 概览\n\n| 侧 | 连接数 | 消息总数 | 时间范围 |\n|---|---|---|---|\n";
+    side_summary("X11 (应用→Xwayland)", in.x11);
+    side_summary("Wayland (Xwayland→合成器)", in.wayland);
+
+    auto side_stats = [&](const char* title, const std::vector<ConnReport>& cs) {
+        std::map<std::string, IfaceStat> agg;
+        for (auto& c : cs)
+            for (auto& kv : c.stats) {
+                auto& s = agg[kv.first];
+                s.sent += kv.second.sent;
+                s.recv += kv.second.recv;
+            }
+        b += fmt("\n## %s\n\n", title);
+        if (agg.empty()) {
+            b += "(无记录)\n";
+            return;
+        }
+        b += "| 协议/接口 | 客户端请求 | 服务端回复/事件 |\n|---|---|---|\n";
+        std::vector<std::string> names;
+        for (auto& kv : agg) names.push_back(kv.first);
+        std::sort(names.begin(), names.end(), [&](const std::string& a, const std::string& c) {
+            return agg[a].sent + agg[a].recv > agg[c].sent + agg[c].recv;
+        });
+        for (auto& n : names)
+            b += fmt("| %s | %d | %d |\n", md_escape(n).c_str(), agg[n].sent, agg[n].recv);
+    };
+    side_stats("X11 侧协议统计", in.x11);
+    side_stats("Wayland 侧接口统计", in.wayland);
+
+    struct Row {
+        TimePoint t;
+        const char* side;
+        const Msg* m;
+    };
+    std::vector<Row> rows;
+    for (auto& c : in.x11)
+        for (auto& m : c.msgs) rows.push_back({m.time, "X11", &m});
+    for (auto& c : in.wayland)
+        for (auto& m : c.msgs) rows.push_back({m.time, "Wayland", &m});
+    std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& c) { return a.t < c.t; });
+
+    b += fmt("\n## 时间轴对照（%zu 条，按时间合并）\n\n", rows.size());
+    if (!rows.empty()) {
+        b += "| 时刻 | 侧 | 对象 | 消息 | 参数 | 字节 |\n|---|---|---|---|---|---|\n";
+        for (auto& r : rows) {
+            std::string detail = r.m->detail;
+            if (detail.size() > 240) detail = detail.substr(0, 240) + "…";
+            b += fmt("| %s | %s | %s | %s | %s | %d |\n", fmt_time_clock(r.t).c_str(), r.side,
+                     md_escape(r.m->object).c_str(), md_escape(r.m->name).c_str(), md_escape(detail).c_str(),
+                     r.m->bytes);
+        }
+    } else {
+        b += "(无记录)\n";
     }
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     if (!f) return false;

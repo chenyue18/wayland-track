@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -8,6 +9,7 @@ struct WArg {
     std::string name;
     std::string type;
     std::string iface;
+    std::string enum_name;
 };
 
 struct WMsgDef {
@@ -15,11 +17,23 @@ struct WMsgDef {
     std::vector<WArg> args;
 };
 
+struct WEnumEntry {
+    std::string name;
+    long long value = 0;
+};
+
+struct WEnum {
+    std::string name;
+    bool bitfield = false;
+    std::vector<WEnumEntry> entries;
+};
+
 struct WIface {
     std::string name;
     int version = 0;
     std::vector<WMsgDef> requests;
     std::vector<WMsgDef> events;
+    std::vector<WEnum> enums;
 };
 
 class ProtoDB {
@@ -30,6 +44,8 @@ public:
 
     const WMsgDef* request(const std::string& iface, int opcode) const;
     const WMsgDef* event(const std::string& iface, int opcode) const;
+    const WEnum* enum_of(const std::string& iface, const std::string& enum_name) const;
+    static std::string format_enum_value(const WEnum* e, uint32_t v);
     size_t iface_count() const { return ifaces_.size(); }
     const WIface* iface(const std::string& name) const {
         auto it = ifaces_.find(name);

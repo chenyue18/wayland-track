@@ -16,7 +16,7 @@
 1. **接管**：守护进程启动时把真实 socket 重命名（`wayland-0` → `wayland-0.wt-real`），在原路径上创建代理监听。对应用完全透明，桌面会话不受影响。
 2. **识别应用**：通过 `SO_PEERCRED` 获得连接方 pid/uid，读取 `/proc/<pid>` 得到进程名、可执行文件、命令行。
 3. **解析协议**（边转发边解析，双向）：
-   - **Wayland**：按官方 wire 格式解码（object id / opcode / 参数），接口定义内嵌了 wayland 核心协议 + [wayland-protocols](https://wayland.app/protocols/) 全部 59 份协议（与上游同步：`cpp/tools/gen_embedded_proto.py` / 重新构建即可），并可在运行时通过 `--protocols-dir` 加载更多定义；通过 `wl_registry` 动态跟踪所有对象，因此即使协议 XML 缺失也能记录接口名。支持 fd 传递参数（`wl_shm`、`wl_keyboard.keymap` 等）。
+   - **Wayland**：按官方 wire 格式解码（object id / opcode / 参数），接口定义内嵌了 wayland 核心协议 + [wayland-protocols](https://wayland.app/protocols/) 全部 59 份协议（与上游同步：`cpp/tools/gen_embedded_proto.py` / 重新构建即可），并可在运行时通过 `--protocols-dir` 加载更多定义；通过 `wl_registry` 动态跟踪所有对象，因此即使协议 XML 缺失也能记录接口名。支持 fd 传递参数（`wl_shm`、`wl_keyboard.keymap` 等）；enum 按协议 XML 符号化（如 `capabilities=pointer|keyboard`、`format=xrgb8888`）。
    - **X11**：解析连接握手（字节序、认证方式）、核心协议全部 120 种请求（ opcode 表由 `tools/xproto.xml` 生成）、通过 `QueryExtension` 动态发现扩展（BIG-REQUESTS、XKEYBOARD、RANDR 等）、区分事件/错误/回复，并为常用请求解码参数（窗口/像素图/GC id、atom 名、属性类型等）。atom 名称通过 `InternAtom` 动态学习。
 4. **应用退出后**（pid 消失或连接全部关闭），自动写出报告。
 
@@ -54,6 +54,17 @@ wayland-track restore           # 恢复 socket 并停止守护进程（异常�
 | `--format md\|json\|both` | 报告格式（默认 both） |
 | `--max-msgs N` | 每连接最多记录的消息条数（默认 50000，统计数字不受影响） |
 | `--protocols-dir DIR1,DIR2` | 额外的协议 XML 目录（默认包含 `/usr/share/wayland-protocols`） |
+
+### 2) X11→Wayland 关联对照报告（xwayland 模式，C++ 版）
+
+```sh
+wayland-track xwayland -- xmessage hello
+wayland-track xwayland --display 91 -- some-x11-app
+```
+
+经受控的独立 Xwayland 实例（`-nolisten local`）启动 X11 应用，同时捕获两侧：
+应用→Xwayland 的 X11 协议，以及 Xwayland 翻译后→合成器的 Wayland 协议，
+输出**单一合并报告**（双侧统计 + 按统一时钟合并的时间轴，可直接对照翻译关系）。
 
 ### 2) 只监控某个应用（launch 模式）
 

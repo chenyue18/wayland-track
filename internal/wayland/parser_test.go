@@ -149,6 +149,31 @@ func TestWaylandChunkedInput(t *testing.T) {
 	}
 }
 
+func TestWaylandEnumDecoding(t *testing.T) {
+	p := newTestParser(t)
+	now := time.Now()
+
+	p.Feed(DirC2S, wlMsg(1, 1, wlU32(2)), 0, now)
+	p.Feed(DirC2S, wlMsg(2, 0, concat(wlU32(1), wlStr("wl_seat"), wlU32(10), wlU32(20))), 0, now)
+	msgs, _ := p.Feed(DirS2C, wlMsg(20, 0, wlU32(3)), 0, now)
+	if len(msgs) != 1 || msgs[0].Name != "capabilities" {
+		t.Fatalf("capabilities 未识别: %+v", msgs)
+	}
+	if !strings.Contains(msgs[0].Detail, "capabilities=pointer|keyboard") {
+		t.Fatalf("bitfield 未符号化: %q", msgs[0].Detail)
+	}
+
+	p.Feed(DirC2S, wlMsg(2, 0, concat(wlU32(1), wlStr("wl_shm"), wlU32(2), wlU32(30))), 0, now)
+	msgs, _ = p.Feed(DirS2C, wlMsg(30, 0, wlU32(1)), 0, now)
+	if !strings.Contains(msgs[0].Detail, "format=xrgb8888") {
+		t.Fatalf("enum 未符号化: %q", msgs[0].Detail)
+	}
+	msgs, _ = p.Feed(DirS2C, wlMsg(30, 0, wlU32(9)), 0, now)
+	if !strings.Contains(msgs[0].Detail, "format=9") {
+		t.Fatalf("未知枚举值应回退数字: %q", msgs[0].Detail)
+	}
+}
+
 func TestWaylandUnknownInterfaceFallback(t *testing.T) {
 	p := newTestParser(t)
 	now := time.Now()

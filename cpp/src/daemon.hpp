@@ -65,4 +65,8 @@ private:
 
 int run_launch(const LaunchOptions& opts);
 
+struct XwaylandOptions;
+
+int run_xwayland(const XwaylandOptions& opts);
+
 void install_signal_handlers();

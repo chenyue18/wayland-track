@@ -138,6 +138,47 @@ void run_test_wayland() {
     CHECK(half2.msgs.size() == 1);
     CHECK(half2.msgs[0].name == "get_registry");
 
+    // enum 符号化解码: wl_seat.capabilities (bitfield)
+    WaylandParser p5(std::make_shared<const ProtoDB>(db));
+    std::vector<uint8_t> getreg;
+    put_u32(getreg, 2);
+    p5.feed(wayland::DIR_C2S, wl_msg(1, 1, getreg).data(), 12, 0, now);
+    std::vector<uint8_t> seat_bind;
+    put_u32(seat_bind, 1);
+    put_str(seat_bind, "wl_seat");
+    put_u32(seat_bind, 10);
+    put_u32(seat_bind, 20);
+    auto rb = p5.feed(wayland::DIR_C2S, wl_msg(2, 0, seat_bind).data(), seat_bind.size() + 8, 0, now);
+    CHECK(rb.msgs.size() == 1);
+    if (rb.msgs.size() == 1) {
+        fprintf(stderr, "BIND: name=%s detail=%s\n", rb.msgs[0].name.c_str(), rb.msgs[0].detail.c_str());
+        CHECK(rb.msgs[0].name == "bind");
+    }
+    std::vector<uint8_t> caps;
+    put_u32(caps, 3);
+    auto re = p5.feed(wayland::DIR_S2C, wl_msg(20, 0, caps).data(), 12, 0, now);
+    CHECK(re.msgs.size() == 1);
+    CHECK_CONTAIN(re.msgs[0].detail, "capabilities=pointer|keyboard");
+
+    // 非位域: wl_shm.format
+    std::vector<uint8_t> shm_bind;
+    put_u32(shm_bind, 1);
+    put_str(shm_bind, "wl_shm");
+    put_u32(shm_bind, 2);
+    put_u32(shm_bind, 30);
+    p5.feed(wayland::DIR_C2S, wl_msg(2, 0, shm_bind).data(), shm_bind.size() + 8, 0, now);
+    std::vector<uint8_t> fmt1;
+    put_u32(fmt1, 1);
+    auto rf2 = p5.feed(wayland::DIR_S2C, wl_msg(30, 0, fmt1).data(), 12, 0, now);
+    CHECK(rf2.msgs.size() == 1);
+    CHECK_CONTAIN(rf2.msgs[0].detail, "format=xrgb8888");
+
+    // 未知枚举值回退数字
+    std::vector<uint8_t> fmt9;
+    put_u32(fmt9, 9);
+    auto rf3 = p5.feed(wayland::DIR_S2C, wl_msg(30, 0, fmt9).data(), 12, 0, now);
+    CHECK_CONTAIN(rf3.msgs[0].detail, "format=9");
+
     // 未知接口回退
     WaylandParser p4(std::make_shared<const ProtoDB>(db));
     std::vector<uint8_t> raw;

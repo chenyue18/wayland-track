@@ -89,6 +89,15 @@ public:
 bool write_json_report(const std::string& path, const Report& rep);
 bool write_markdown_report(const std::string& path, const Report& rep);
 
+struct CorrelatedInput {
+    AppInfo app;
+    std::string display;
+    std::vector<ConnReport> x11;
+    std::vector<ConnReport> wayland;
+};
+bool write_correlated_json(const std::string& path, const CorrelatedInput& in);
+bool write_correlated_markdown(const std::string& path, const CorrelatedInput& in);
+
 class Tracker {
 public:
     Tracker(std::string dir, std::string format, int max_msgs);
@@ -99,6 +108,8 @@ public:
     void close_conn(uint64_t conn_id);
     void sweep();
     void finalize_all();
+    void set_collect_only(bool v) { collect_only_ = v; }
+    std::vector<Report> finalize_collect();
     int active_conns() const;
 
 private:
@@ -106,8 +117,12 @@ private:
     struct Session;
 
     void finalize_locked(int pid);
+    void finalize_all_locked();
     Report build_report(const Session& s) const;
     std::string write_report(const Report& rep) const;
+
+    bool collect_only_ = false;
+    std::vector<Report> collected_;
 
     struct ConnData {
         uint64_t id = 0;

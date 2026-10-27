@@ -1,5 +1,7 @@
 #include "wayland.hpp"
 
+#include <string>
+
 #include <algorithm>
 #include <cstring>
 
@@ -86,15 +88,22 @@ FeedResult WaylandParser::feed(int dir, const uint8_t* data, size_t len, int fd_
 
 std::string WaylandParser::decode_arg(int dir, ArgReader& rd, const WArg& a, const std::string& iface) {
     const char* name = a.name.c_str();
-    if (a.type == "int") {
-        int32_t v;
-        if (!rd.i32(v)) return {};
-        return fmt("%s=%d", name, v);
-    }
-    if (a.type == "uint") {
-        uint32_t v;
-        if (!rd.u32(v)) return {};
-        return fmt("%s=%u", name, v);
+    if (a.type == "int" || a.type == "uint") {
+        bool is_uint = a.type == "uint";
+        uint32_t u;
+        int32_t i;
+        if (is_uint) {
+            if (!rd.u32(u)) return {};
+            i = int32_t(u);
+        } else {
+            if (!rd.i32(i)) return {};
+            u = uint32_t(i);
+        }
+        if (!a.enum_name.empty()) {
+            const WEnum* e = db_->enum_of(iface, a.enum_name);
+            return fmt("%s=%s", name, ProtoDB::format_enum_value(e, u).c_str());
+        }
+        return is_uint ? fmt("%s=%u", name, u) : fmt("%s=%d", name, i);
     }
     if (a.type == "fixed") {
         int32_t v;

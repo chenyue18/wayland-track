@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "daemon.hpp"
+#include "xwayland.hpp"
 #include "logger.hpp"
 #include "takeover.hpp"
 
@@ -30,6 +31,8 @@ static void usage() {
         "  wayland-track daemon [flags]     启动守护进程，接管 Wayland/X11 socket 并记录所有应用\n"
         "  wayland-track launch [flags] -- CMD [ARGS...]\n"
         "                                   以受控方式启动单个应用并生成报告\n"
+        "  wayland-track xwayland [--display N] -- CMD [ARGS...]\n"
+        "                                   经受控 Xwayland 启动 X11 应用，生成 X11/Wayland 关联对照报告\n"
         "  wayland-track restore            恢复被接管的 socket\n"
         "  wayland-track status             查看守护进程与接管状态\n"
         "\n"
@@ -192,6 +195,31 @@ static bool pid_alive(int pid) {
     return kill(pid, 0) == 0;
 }
 
+static int cmd_xwayland(const std::vector<std::string>& args) {
+    ParsedFlags pf = parse_flags(args, false);
+    int display = -1;
+    std::vector<std::string> rest;
+    for (size_t i = 0; i < pf.positional.size(); i++) {
+        if (pf.positional[i] == "--display" && i + 1 < pf.positional.size()) {
+            display = atoi(pf.positional[i + 1].c_str());
+            i++;
+            continue;
+        }
+        rest.push_back(pf.positional[i]);
+    }
+    if (rest.empty()) {
+        fprintf(stderr, "用法: wayland-track xwayland [--display N] -- CMD [ARGS...]\n");
+        return 2;
+    }
+    std::string rd = runtime_dir();
+    if (rd.empty()) return 1;
+    XwaylandOptions xo;
+    xo.base = build_options(rd, pf.common);
+    xo.command = rest;
+    xo.display = display;
+    return run_xwayland(xo);
+}
+
 static int cmd_restore(const std::vector<std::string>& args) {
     (void)args;
     std::string rd = runtime_dir();
@@ -244,6 +272,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> rest(args.begin() + 1, args.end());
     if (cmd == "daemon") return cmd_daemon(rest);
     if (cmd == "launch") return cmd_launch(rest);
+    if (cmd == "xwayland") return cmd_xwayland(rest);
     if (cmd == "restore") return cmd_restore(rest);
     if (cmd == "status") return cmd_status(rest);
     if (cmd == "help" || cmd == "-h" || cmd == "--help") {

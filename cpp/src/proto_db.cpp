@@ -18,6 +18,20 @@ void ProtoDB::load_xml_string(const std::string& xml, const std::string& src_nam
         iface.name = in->attr("name");
         iface.version = atoi(in->attr("version", "0").c_str());
         if (iface.name.empty()) continue;
+        for (const auto& en_up : in->children) {
+            const XNode* en = en_up.get();
+            if (en->name != "enum") continue;
+            WEnum e;
+            e.name = en->attr("name");
+            e.bitfield = en->attr("bitfield") == "true";
+            for (const XNode* et : en->children_of("entry")) {
+                WEnumEntry entry;
+                entry.name = et->attr("name");
+                entry.value = strtoll(et->attr("value", "0").c_str(), nullptr, 0);
+                e.entries.push_back(std::move(entry));
+            }
+            if (!e.name.empty()) iface.enums.push_back(std::move(e));
+        }
         for (const auto& m_up : in->children) {
         const XNode* m = m_up.get();
             bool is_req = m->name == "request";
@@ -30,6 +44,7 @@ void ProtoDB::load_xml_string(const std::string& xml, const std::string& src_nam
                 arg.name = a->attr("name");
                 arg.type = a->attr("type");
                 arg.iface = a->attr("interface");
+                arg.enum_name = a->attr("enum");
                 def.args.push_back(std::move(arg));
             }
             if (is_req)
@@ -80,6 +95,43 @@ int ProtoDB::load_dirs(const std::vector<std::string>& dirs) {
         }
     }
     return count;
+}
+
+const WEnum* ProtoDB::enum_of(const std::string& iface, const std::string& enum_name) const {
+    if (enum_name.empty()) return nullptr;
+    if (size_t dot = enum_name.find('.'); dot != std::string::npos) {
+        return enum_of(enum_name.substr(0, dot), enum_name.substr(dot + 1));
+    }
+    const WIface* i = this->iface(iface);
+    if (!i) return nullptr;
+    for (auto& e : i->enums)
+        if (e.name == enum_name) return &e;
+    return nullptr;
+}
+
+std::string ProtoDB::format_enum_value(const WEnum* e, uint32_t v) {
+    if (!e) return fmt("%u", v);
+    if (e->bitfield) {
+        std::string out;
+        uint32_t covered = 0;
+        for (auto& entry : e->entries) {
+            if (entry.value != 0 && (v & static_cast<uint32_t>(entry.value)) == static_cast<uint32_t>(entry.value)) {
+                if (!out.empty()) out += "|";
+                out += entry.name;
+                covered |= static_cast<uint32_t>(entry.value);
+            }
+        }
+        uint32_t unknown = v & ~covered;
+        if (unknown) {
+            if (!out.empty()) out += "|";
+            out += fmt("0x%x", unknown);
+        }
+        return out.empty() ? "0" : out;
+    }
+    for (auto& entry : e->entries)
+        if (static_cast<uint32_t>(entry.value) == v) return entry.name;
+    if (v <= 0x7fffffffu) return fmt("%d", int32_t(v));
+    return fmt("%u", v);
 }
 
 const WMsgDef* ProtoDB::request(const std::string& iface, int opcode) const {
